@@ -7,6 +7,7 @@ pub enum Token {
     LinkEnd,
     Text(String),
     ListItem(u8),
+    Indent(u8),
     Code,
     InlineMath(String),
     DisplayMath(String),
@@ -16,6 +17,49 @@ pub enum Token {
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Token::Header(level) => {
+                write!(f, "\x1b[36m[H{}] \x1b[0m", level)
+            }
+            Token::Bold => {
+                write!(f, "\x1b[1m[BOLD] \x1b[0m")
+            }
+            Token::Italic => {
+                write!(f, "\x1b[3m[ITALIC] \x1b[0m")
+            }
+            Token::LinkStart => {
+                write!(f, "\x1b[35m[LINK_START] \x1b[0m")
+            }
+            Token::LinkEnd => {
+                write!(f, "\x1b[35m[LINK_END] \x1b[0m")
+            }
+            Token::Text(content) => {
+                write!(f, "\x1b[37m[TEXT: {}] \x1b[0m", content)
+            }
+            Token::ListItem(level) => {
+                write!(f, "\x1b[34m[LI{}] \x1b[0m", level)
+            }
+            Token::Indent(level) => {
+                write!(f, "\x1b[90m[INDENT{}] \x1b[0m", level)
+            }
+            Token::Code => {
+                write!(f, "\x1b[32m[CODE] \x1b[0m")
+            }
+            Token::InlineMath(content) => {
+                write!(f, "\x1b[33m[MATH: {}] \x1b[0m", content)
+            }
+            Token::DisplayMath(content) => {
+                write!(f, "\x1b[33;1m[MATH_DISP: {}] \x1b[0m", content)
+            }
+            Token::NewLine => {
+                write!(f, "\x1b[90m[NL] \x1b[0m")
+            }
+        }
+    }
 }
 
 impl<'a> Lexer<'a> {
@@ -34,15 +78,41 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        let mut line_begins = true;
+
         while let Some(current) = &self.advance() {
             match current {
+                ' ' => {
+                    if line_begins {
+                        let mut indent_level: u8 = 1;
+                        while !self.eof() && self.next_is(' ') {
+                            indent_level += 1;
+                            self.advance();
+                        }
+                        if self.next_is('-') {
+                            tokens.push(Token::ListItem(indent_level));
+                            self.advance(); // '-'
+                            self.advance(); // ' '
+                        } else {
+                            tokens.push(Token::Indent(indent_level));
+                        }
+                    } else {
+                        current_text.push(*current);
+                    }
+                }
+                '-' if line_begins && self.next_is(' ') => {
+                    tokens.push(Token::ListItem(0));
+                    self.advance();
+                }
                 '\n' => {
                     push_text(&mut tokens, &mut current_text);
                     tokens.push(Token::NewLine);
+                    line_begins = true;
+                    continue;
                 }
                 '#' => {
                     push_text(&mut tokens, &mut current_text);
-                    tokens.push(Token::Header(self.advance_until(' ').len() as u8));
+                    tokens.push(Token::Header(self.advance_until(' ').len() as u8 + 1));
                 }
                 '*' => {
                     push_text(&mut tokens, &mut current_text);
@@ -69,16 +139,23 @@ impl<'a> Lexer<'a> {
                 '\\' => {
                     if self.next_is('[') {
                         self.advance();
+                        push_text(&mut tokens, &mut current_text);
                         tokens.push(Token::DisplayMath(self.advance_until_two(('\\', ']'))));
                     } else {
-                        tokens.push(Token::Text(current.to_string()));
+                        current_text.push(*current);
                     }
                 }
-                _ => current_text.push(*current),
+                _ => {
+                    current_text.push(*current);
+                }
             }
+            line_begins = false;
         }
 
-        push_text(&mut tokens, &mut current_text);
+        if !current_text.is_empty() {
+            tokens.push(Token::Text(current_text.iter().collect::<String>()));
+            current_text.clear();
+        }
 
         tokens
     }
@@ -104,7 +181,7 @@ impl<'a> Lexer<'a> {
         while !self.eof() && !self.next_is(until) {
             consumed.push(self.advance().unwrap());
         }
-        consumed.push(self.advance().unwrap());
+        self.advance().unwrap();
         consumed.iter().collect::<String>()
     }
     fn advance_until_two(&mut self, until: (char, char)) -> String {

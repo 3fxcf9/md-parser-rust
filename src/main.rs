@@ -16,6 +16,11 @@ fn nodes_to_html(nodes: Vec<Node>) -> String {
             Node::Italic(children) => format!("<em>{}</em>", nodes_to_html(children)),
             Node::DisplayMath(math) => format!("<display-math>{}</display-math>", math),
             Node::InlineMath(math) => format!("<inline-math>{}</inline-math>", math),
+            Node::List {
+                list_type: _,
+                children,
+            } => format!("<ul>{}</ul>", nodes_to_html(children)),
+            Node::ListItem(children) => format!("<li>{}</li>", nodes_to_html(children)),
             _ => todo!(),
         });
     }
@@ -23,14 +28,22 @@ fn nodes_to_html(nodes: Vec<Node>) -> String {
 }
 
 fn main() {
-    let test = "# Header $1$\n\n### Level _three_\n_this_ is *italic* and **this** is __bold__ text.\n\\[\n\\sqrt{test}\n\\]\ntext";
+    // let test = "# Header $1$\n\n### Level _three_\n_this_ is *italic* and **this** is __bold__ text.\n\\[\n\\sqrt{test}\n\\]\ntext";
     // let test = "text and _italic with **bold**nested_.";
     // let test = "# Header one\n\n### Level _three_\n_this_ is *italic* and **this** is __bold__ text.";
+    // let test = "hello\n- first\n  second\n    - nested\n      test\n- third\ntext";
+
+    let test = include_str!("test.md");
+
     let mut tokenizer = Lexer::new(test);
     let tokens = tokenizer.tokenize();
-    dbg!(&tokens);
+
+    for token in &tokens {
+        println!("{}", token);
+    }
+
     let mut parser = Parser::new(tokens);
-    let nodes = parser.parse();
+    let nodes = parser.parse(false);
     dbg!(&nodes);
 
     println!("IN: {:?}", test);
