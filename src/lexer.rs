@@ -3,15 +3,20 @@ pub enum Token {
     Header(u8),
     Bold,
     Italic,
+    Striked,
+    Underline,
+    Highlighted,
     LinkStart,
     LinkEnd,
     Text(String),
     ListItem(u8),
     Indent(u8),
-    Code,
+    InlineCode(String),
+    CodeBlock(String),
     InlineMath(String),
     DisplayMath(String),
     NewLine,
+    NBSP,
 }
 
 pub struct Lexer<'a> {
@@ -19,52 +24,14 @@ pub struct Lexer<'a> {
     pos: usize,
 }
 
-impl std::fmt::Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Token::Header(level) => {
-                write!(f, "\x1b[36m[H{}] \x1b[0m", level)
-            }
-            Token::Bold => {
-                write!(f, "\x1b[1m[BOLD] \x1b[0m")
-            }
-            Token::Italic => {
-                write!(f, "\x1b[3m[ITALIC] \x1b[0m")
-            }
-            Token::LinkStart => {
-                write!(f, "\x1b[35m[LINK_START] \x1b[0m")
-            }
-            Token::LinkEnd => {
-                write!(f, "\x1b[35m[LINK_END] \x1b[0m")
-            }
-            Token::Text(content) => {
-                write!(f, "\x1b[37m[TEXT: {}] \x1b[0m", content)
-            }
-            Token::ListItem(level) => {
-                write!(f, "\x1b[34m[LI{}] \x1b[0m", level)
-            }
-            Token::Indent(level) => {
-                write!(f, "\x1b[90m[INDENT{}] \x1b[0m", level)
-            }
-            Token::Code => {
-                write!(f, "\x1b[32m[CODE] \x1b[0m")
-            }
-            Token::InlineMath(content) => {
-                write!(f, "\x1b[33m[MATH: {}] \x1b[0m", content)
-            }
-            Token::DisplayMath(content) => {
-                write!(f, "\x1b[33;1m[MATH_DISP: {}] \x1b[0m", content)
-            }
-            Token::NewLine => {
-                write!(f, "\x1b[90m[NL] \x1b[0m")
-            }
-        }
-    }
-}
-
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Lexer { input, pos: 0 }
+    }
+
+    fn remove_indents(text: String, _level: u8) -> String {
+        //TODO: Remove indent in code blocks
+        text
     }
 
     pub fn tokenize(&mut self) -> Vec<Token> {
@@ -132,15 +99,57 @@ impl<'a> Lexer<'a> {
                         tokens.push(Token::Italic);
                     }
                 }
+                '~' => {
+                    push_text(&mut tokens, &mut current_text);
+                    if self.next_is('~') {
+                        self.advance();
+                        tokens.push(Token::Striked);
+                    } else {
+                        tokens.push(Token::NBSP);
+                    }
+                }
+                '.' => {
+                    push_text(&mut tokens, &mut current_text);
+                    if self.next_is('.') {
+                        self.advance();
+                        tokens.push(Token::Underline);
+                    } else {
+                        current_text.push(*current);
+                    }
+                }
+                '|' => {
+                    push_text(&mut tokens, &mut current_text);
+                    if self.next_is('|') {
+                        self.advance();
+                        tokens.push(Token::Highlighted);
+                    } else {
+                        current_text.push(*current);
+                    }
+                }
                 '$' => {
                     push_text(&mut tokens, &mut current_text);
                     tokens.push(Token::InlineMath(self.advance_until('$')));
+                }
+                '`' => {
+                    push_text(&mut tokens, &mut current_text);
+                    if self.next_are(vec!['`', '`']) {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::CodeBlock(Lexer::remove_indents(
+                            self.advance_until_chars(vec!['`'; 3]),
+                            0,
+                        )));
+                    } else {
+                        tokens.push(Token::InlineCode(self.advance_until('`')));
+                    }
                 }
                 '\\' => {
                     if self.next_is('[') {
                         self.advance();
                         push_text(&mut tokens, &mut current_text);
-                        tokens.push(Token::DisplayMath(self.advance_until_two(('\\', ']'))));
+                        tokens.push(Token::DisplayMath(
+                            self.advance_until_chars(vec!['\\', ']']),
+                        ));
                     } else {
                         current_text.push(*current);
                     }
@@ -173,6 +182,25 @@ impl<'a> Lexer<'a> {
         }
         return false;
     }
+    fn next_are(&self, what: Vec<char>) -> bool {
+        let mut offset = 0;
+        for _ in &what {
+            if self.pos + offset < self.input.len()
+                && &what[offset] == &self.input.chars().nth(self.pos + offset).unwrap()
+            {
+                offset += 1
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+    fn next_n_is(&self, what: char, n: usize) -> bool {
+        if let Some(next_char) = self.input.chars().nth(self.pos + n) {
+            return next_char == what;
+        }
+        return false;
+    }
     fn eof(&self) -> bool {
         self.pos >= self.input.len()
     }
@@ -184,16 +212,19 @@ impl<'a> Lexer<'a> {
         self.advance().unwrap();
         consumed.iter().collect::<String>()
     }
-    fn advance_until_two(&mut self, until: (char, char)) -> String {
+    fn advance_until_chars(&mut self, until: Vec<char>) -> String {
         let mut consumed: Vec<char> = vec![];
-        let mut previous_was: Option<char> = None;
-        while (!self.eof()) && !(previous_was == Some(until.0) && self.next_is(until.1)) {
-            let current = self.advance().unwrap();
-            previous_was = Some(current);
-            consumed.push(current);
-        }
-        self.advance();
 
-        consumed[..consumed.len() - 1].iter().collect::<String>()
+        fn check_previous(consumed: &Vec<char>, until: &Vec<char>) -> bool {
+            consumed.len() >= until.len() && *until == consumed[(consumed.len() - until.len())..]
+        }
+
+        while !self.eof() && !check_previous(&consumed, &until) {
+            consumed.push(self.advance().unwrap());
+        }
+
+        consumed[..consumed.len() - until.len()]
+            .iter()
+            .collect::<String>()
     }
 }

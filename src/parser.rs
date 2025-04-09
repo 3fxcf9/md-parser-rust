@@ -13,6 +13,9 @@ pub enum Node {
     },
     Bold(Vec<Node>),
     Italic(Vec<Node>),
+    Striked(Vec<Node>),
+    Underline(Vec<Node>),
+    Highlighted(Vec<Node>),
     Link {
         url: String,
         childen: Vec<Node>,
@@ -22,6 +25,7 @@ pub enum Node {
         children: Vec<Node>,
     },
     ListItem(Vec<Node>),
+    InlineCode(String),
     CodeBlock {
         language: Option<String>,
         code: String,
@@ -31,6 +35,7 @@ pub enum Node {
     NewLine,
     Paragraph(Vec<Node>),
     Text(String),
+    NBSP,
 }
 
 pub struct Parser {
@@ -42,14 +47,21 @@ impl Parser {
         Parser { tokens }
     }
 
+    pub fn preprocess(tokens: Vec<Token>) -> Vec<Token> {
+        match tokens.get(0) {
+            Some(Token::Header(_)) => tokens,
+            _ => [vec![Token::NewLine; 2], tokens].concat(),
+        }
+    }
+
     pub fn parse(&mut self, parsing_list: bool) -> Vec<Node> {
         let mut nodes: Vec<Node> = vec![];
 
-        while let Some(current) = self.advance() {
+        'parse: while let Some(current) = self.advance() {
             match current {
                 Token::ListItem(indent_level) if !parsing_list => {
                     let mut consumed = vec![Token::ListItem(indent_level)];
-                    consumed.extend(self.advance_until(&Token::NewLine));
+                    consumed.extend(self.advance_until_included(&Token::NewLine));
 
                     while let Some(tok) = self.tokens.get(0) {
                         match tok {
@@ -59,15 +71,25 @@ impl Parser {
                             Token::NewLine => (),
                             _ => break,
                         }
-                        consumed.extend(self.advance_until(&Token::NewLine));
+                        consumed.extend(self.advance_until_included(&Token::NewLine));
                     }
+
+                    self.tokens.insert(0, Token::NewLine);
+                    self.tokens.insert(0, Token::NewLine);
+
                     nodes.push(Node::List {
                         list_type: ListType::Normal,
                         children: Parser::new(consumed).parse(true),
                     })
                 }
                 Token::ListItem(indent_level) if parsing_list => {
-                    let mut consumed = self.advance_until(&Token::NewLine);
+                    let should_include_paragraph = if let Some(Token::Text(_)) = self.tokens.get(0)
+                    {
+                        true
+                    } else {
+                        false
+                    };
+                    let mut consumed = self.advance_until_included(&Token::NewLine);
 
                     while let Some(tok) = self.tokens.get(0) {
                         match tok {
@@ -76,7 +98,12 @@ impl Parser {
                             Token::NewLine => (),
                             _ => break,
                         }
-                        consumed.extend(self.advance_until(&Token::NewLine));
+                        consumed.extend(self.advance_until_included(&Token::NewLine));
+                    }
+
+                    if should_include_paragraph {
+                        consumed.insert(0, Token::NewLine);
+                        consumed.insert(0, Token::NewLine);
                     }
 
                     nodes.push(Node::ListItem(Parser::new(consumed).parse(false)));
@@ -88,7 +115,8 @@ impl Parser {
                 // })
                 Token::Header(level) => nodes.push(Node::Header {
                     level,
-                    children: Parser::new(self.advance_until(&Token::NewLine)).parse(false),
+                    children: Parser::new(self.advance_until_and_stop_before(&Token::NewLine))
+                        .parse(false),
                 }),
                 Token::Bold => nodes.push(Node::Bold(
                     Parser::new(self.advance_until(&Token::Bold)).parse(false),
@@ -96,17 +124,50 @@ impl Parser {
                 Token::Italic => nodes.push(Node::Italic(
                     Parser::new(self.advance_until(&Token::Italic)).parse(false),
                 )),
+                Token::Striked => nodes.push(Node::Striked(
+                    Parser::new(self.advance_until(&Token::Striked)).parse(false),
+                )),
+                Token::Underline => nodes.push(Node::Underline(
+                    Parser::new(self.advance_until(&Token::Underline)).parse(false),
+                )),
+                Token::Highlighted => nodes.push(Node::Highlighted(
+                    Parser::new(self.advance_until(&Token::Highlighted)).parse(false),
+                )),
                 Token::Text(text) => nodes.push(Node::Text(text.clone())),
                 Token::InlineMath(math) => nodes.push(Node::InlineMath(math.to_string())),
                 Token::DisplayMath(math) => nodes.push(Node::DisplayMath(math.to_string())),
+                Token::InlineCode(code) => nodes.push(Node::InlineCode(code.to_string())),
+                Token::CodeBlock(code) => nodes.push(Node::CodeBlock {
+                    language: None,
+                    code: code.to_string(),
+                }),
                 Token::NewLine => {
                     if self.next_is(&Token::NewLine) {
                         self.advance();
-                        nodes.push(Node::NewLine);
+                        let mut consumed: Vec<Token> = vec![];
+
+                        while !self.eof()
+                            && !(self.next_is(&Token::NewLine)
+                                && self.next_n_is(&Token::NewLine, 1))
+                        {
+                            // Stop at one of [list, header, code block] and cancel paragraph creation
+                            match self.tokens.get(0).unwrap() {
+                                Token::ListItem(_)
+                                | Token::Header(_)
+                                | Token::CodeBlock(_)
+                                | Token::DisplayMath(_) => continue 'parse,
+                                _ => consumed.push(self.advance().unwrap()),
+                            }
+                        }
+
+                        if !consumed.is_empty() {
+                            nodes.push(Node::Paragraph(Parser::new(consumed).parse(false)));
+                        }
                     } else {
-                        nodes.push(Node::Text(" ".to_string()))
+                        nodes.push(Node::NewLine)
                     }
                 }
+                Token::NBSP => nodes.push(Node::NBSP),
                 Token::Indent(_) => (),
                 _ => todo!(),
             }
@@ -125,6 +186,9 @@ impl Parser {
     fn next_is(&self, what: &Token) -> bool {
         self.tokens.get(0) == Some(what)
     }
+    fn next_n_is(&self, what: &Token, offset: usize) -> bool {
+        self.tokens.get(offset) == Some(what)
+    }
     fn eof(&self) -> bool {
         self.tokens.is_empty()
     }
@@ -133,9 +197,46 @@ impl Parser {
         while !self.eof() && !self.next_is(until) {
             consumed.push(self.tokens.remove(0));
         }
+        self.advance();
+        consumed
+    }
+    fn advance_until_included(&mut self, until: &Token) -> Vec<Token> {
+        let mut consumed: Vec<Token> = vec![];
+        while !self.eof() && !self.next_is(until) {
+            consumed.push(self.tokens.remove(0));
+        }
+
         if let Some(next) = self.advance() {
             consumed.push(next);
         }
         consumed
+    }
+    fn advance_until_and_stop_before(&mut self, until: &Token) -> Vec<Token> {
+        let mut consumed: Vec<Token> = vec![];
+        while !self.eof() && !self.next_is(until) {
+            consumed.push(self.tokens.remove(0));
+        }
+
+        consumed
+    }
+    fn advance_until_tokens(&mut self, until: &Vec<Token>) -> Vec<Token> {
+        let mut consumed: Vec<Token> = vec![];
+
+        fn check_previous(consumed: &Vec<Token>, until: &Vec<Token>) -> bool {
+            consumed.len() >= until.len() && *until == consumed[(consumed.len() - until.len())..]
+        }
+
+        while !self.eof() && !check_previous(&consumed, &until) {
+            consumed.push(self.advance().unwrap());
+        }
+
+        if consumed.len() >= until.len() {
+            for u in until {
+                self.tokens.insert(0, u.clone());
+            }
+            consumed[..consumed.len() - until.len()].to_vec()
+        } else {
+            vec![]
+        }
     }
 }
