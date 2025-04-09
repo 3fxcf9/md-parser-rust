@@ -1,4 +1,12 @@
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub enum HrStyle {
+    Normal,
+    Dotted,
+    Dashed,
+    Sawtooth,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Token {
     Header(u8),
     Bold,
@@ -16,6 +24,7 @@ pub enum Token {
     InlineMath(String),
     DisplayMath(String),
     NewLine,
+    Hr(HrStyle),
     NBSP,
 }
 
@@ -71,6 +80,28 @@ impl<'a> Lexer<'a> {
                     tokens.push(Token::ListItem(0));
                     self.advance();
                 }
+                // Hr
+                '=' if self.next_are(vec!['='; 2]) => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Hr(HrStyle::Normal));
+                }
+                '-' if self.next_are(vec!['-'; 2]) => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Hr(HrStyle::Dashed));
+                }
+                '.' if self.next_are(vec!['.'; 2]) => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Hr(HrStyle::Dotted));
+                }
+                '^' if self.next_are(vec!['^'; 2]) => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Hr(HrStyle::Sawtooth));
+                }
+
                 '\n' => {
                     push_text(&mut tokens, &mut current_text);
                     tokens.push(Token::NewLine);
@@ -132,7 +163,7 @@ impl<'a> Lexer<'a> {
                 }
                 '`' => {
                     push_text(&mut tokens, &mut current_text);
-                    if self.next_are(vec!['`', '`']) {
+                    if self.next_are(vec!['`'; 2]) {
                         self.advance();
                         self.advance();
                         tokens.push(Token::CodeBlock(Lexer::remove_indents(

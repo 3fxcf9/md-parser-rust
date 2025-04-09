@@ -1,5 +1,13 @@
 top-level paragraph
 
+===
+
+---
+
+...
+
+^^^
+
 # Heading
 
 a paragraph

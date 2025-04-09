@@ -1,4 +1,4 @@
-use crate::lexer::Token;
+use crate::lexer::{HrStyle, Token};
 
 #[derive(Debug)]
 pub enum ListType {
@@ -35,6 +35,7 @@ pub enum Node {
     NewLine,
     Paragraph(Vec<Node>),
     Text(String),
+    Hr(HrStyle),
     NBSP,
 }
 
@@ -150,12 +151,13 @@ impl Parser {
                             && !(self.next_is(&Token::NewLine)
                                 && self.next_n_is(&Token::NewLine, 1))
                         {
-                            // Stop at one of [list, header, code block] and cancel paragraph creation
+                            // Stop at one of [list, header, code block, hr] and cancel paragraph creation
                             match self.tokens.get(0).unwrap() {
                                 Token::ListItem(_)
                                 | Token::Header(_)
                                 | Token::CodeBlock(_)
-                                | Token::DisplayMath(_) => continue 'parse,
+                                | Token::DisplayMath(_)
+                                | Token::Hr(_) => continue 'parse,
                                 _ => consumed.push(self.advance().unwrap()),
                             }
                         }
@@ -168,6 +170,7 @@ impl Parser {
                     }
                 }
                 Token::NBSP => nodes.push(Node::NBSP),
+                Token::Hr(style) => nodes.push(Node::Hr(style)),
                 Token::Indent(_) => (),
                 _ => todo!(),
             }

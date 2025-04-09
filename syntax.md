@@ -44,9 +44,10 @@ display math OK
 
 ~ auto (> then \* then + then -)
 
---- hline
-... dotted hline
-^^^ sawteeth hline
+=== filled hline OK
+--- dashed hline OK
+... dotted hline OK
+^^^ sawtooth hline OK
 
 ## Environments
 
