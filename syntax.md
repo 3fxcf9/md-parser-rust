@@ -73,3 +73,32 @@ display math OK
 - exo (trouver equivalent en anglais)
 - fold
 - conceal / block <level/categ>
+
+%env
+text
+
+    %env
+    text
+
+        %env
+        text
+            %env
+            text
+            %
+        %
+    %
+
+%
+
+%env
+text
+%%env
+text
+%%%env
+text
+%%%%env
+text
+%%%%
+%%%
+%%
+%

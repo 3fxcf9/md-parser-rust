@@ -6,6 +6,19 @@ pub enum ListType {
 }
 
 #[derive(Debug)]
+pub enum EnvType {
+    Definition,
+    Theorem,
+    Corollary,
+    Lemma,
+    Remark,
+    Example,
+    Exercise,
+    Fold,
+    Conceal,
+}
+
+#[derive(Debug)]
 pub enum Node {
     Header {
         level: u8,
@@ -32,6 +45,11 @@ pub enum Node {
     },
     InlineMath(String),
     DisplayMath(String),
+    Env {
+        environment_type: EnvType,
+        environment_arg: Option<Vec<Node>>,
+        children: Vec<Node>,
+    },
     NewLine,
     Paragraph(Vec<Node>),
     Text(String),
@@ -142,6 +160,46 @@ impl Parser {
                     language: None,
                     code: code.to_string(),
                 }),
+                Token::EnvBegin(name) => {
+                    let env_type = match name.as_str() {
+                        "def" => EnvType::Definition,
+                        "thm" => EnvType::Theorem,
+                        "cor" => EnvType::Corollary,
+                        "lemma" => EnvType::Lemma,
+                        "rem" => EnvType::Remark,
+                        "eg" => EnvType::Example,
+                        "ex" => EnvType::Exercise,
+                        "fold" => EnvType::Fold,
+                        "conceal" => EnvType::Conceal,
+                        _ => continue 'parse,
+                    };
+
+                    let line = self.advance_until(&Token::NewLine);
+                    let arg = if line.len() > 0 {
+                        Some(Parser::new(line).parse(false))
+                    } else {
+                        None
+                    };
+
+                    let mut consumed: Vec<Token> = vec![];
+                    let mut count: i8 = 0;
+                    while !self.eof() && (!self.next_is(&Token::EnvEnd) || count != 0) {
+                        let current = self.tokens.remove(0);
+                        match current {
+                            Token::EnvBegin(_) => count += 1,
+                            Token::EnvEnd => count -= 1,
+                            _ => (),
+                        }
+                        consumed.push(current);
+                    }
+                    self.advance();
+
+                    nodes.push(Node::Env {
+                        environment_type: env_type,
+                        environment_arg: arg,
+                        children: Parser::new(consumed).parse(false),
+                    })
+                }
                 Token::NewLine => {
                     if self.next_is(&Token::NewLine) {
                         self.advance();
@@ -151,9 +209,11 @@ impl Parser {
                             && !(self.next_is(&Token::NewLine)
                                 && self.next_n_is(&Token::NewLine, 1))
                         {
-                            // Stop at one of [list, header, code block, hr] and cancel paragraph creation
+                            // Stop at one of [list, header, code block, hr, env] and cancel paragraph creation
                             match self.tokens.get(0).unwrap() {
-                                Token::ListItem(_)
+                                Token::EnvBegin(_)
+                                | Token::EnvEnd
+                                | Token::ListItem(_)
                                 | Token::Header(_)
                                 | Token::CodeBlock(_)
                                 | Token::DisplayMath(_)

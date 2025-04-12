@@ -1,5 +1,28 @@
 top-level paragraph
 
+%def definition **name**
+%%cor ||corollary ..name..||
+corollary content
+%%%cor
+nested corollary content with
+
+\[
+math
+\]
+%%%
+%%
+definition content
+%
+
+some text here
+
+%fold
+
+- test
+- test
+  fold content
+  %
+
 ===
 
 ---

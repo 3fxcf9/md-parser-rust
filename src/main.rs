@@ -1,7 +1,7 @@
 mod lexer;
 mod parser;
 use lexer::{HrStyle, Lexer, Token};
-use parser::{Node, Parser};
+use parser::{EnvType, Node, Parser};
 use std::fs;
 
 fn nodes_to_html(nodes: &Vec<Node>) -> String {
@@ -32,6 +32,35 @@ fn nodes_to_html(nodes: &Vec<Node>) -> String {
                     }
                 )
             }
+            Node::Env {
+                environment_type,
+                environment_arg,
+                children,
+            } => {
+                let env_type = match environment_type {
+                    EnvType::Definition => "definition",
+                    EnvType::Theorem => "theorem",
+                    EnvType::Corollary => "corollary",
+                    EnvType::Lemma => "lemma",
+                    EnvType::Remark => "remark",
+                    EnvType::Example => "example",
+                    EnvType::Exercise => "exercise",
+                    EnvType::Fold => "fold",
+                    EnvType::Conceal => "conceal",
+                };
+
+                let env_name = if let Some(name) = environment_arg {
+                    format!("<div class=\"environment-name\">{}</div>", {
+                        nodes_to_html(name)
+                    })
+                } else {
+                    String::new()
+                };
+                format!(
+                    "<div class=\"environment environment-{env_type}\">{env_name}{}</div>",
+                    nodes_to_html(children)
+                )
+            }
             Node::List {
                 list_type: _,
                 children,
@@ -56,9 +85,9 @@ fn nodes_to_html(nodes: &Vec<Node>) -> String {
 }
 
 fn main() {
-    let input = include_str!("test.md");
+    let input = fs::read_to_string("test.md").expect("Error reading file");
 
-    let mut lexer = Lexer::new(input);
+    let mut lexer = Lexer::new(input.as_str());
     let tokens = lexer.tokenize();
 
     dbg!(&tokens);
@@ -70,10 +99,10 @@ fn main() {
 
     let out = nodes_to_html(&nodes);
 
-    println!("IN: {:?}", input);
-    println!("OUT: {:?}", out);
+    // println!("IN: {:?}", input);
+    // println!("OUT: {:?}", out);
 
-    let head = "<style>p {padding: 1rem; border: 1px dashed red;} .math-inline{font-family: monospace; font-weight: bold; color: grey;} .math-display{font-family: monospace; font-weight: bold; color: grey; display: block; padding: 1rem; text-align: center; font-size: 2rem;} hr {margin-top: 2px solid gray;} hr.style-dashed {border-style: dashed;} hr.style-dotted {border-style: dotted;} hr.style-sawtooth {border-image: url('data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 viewBox%3D%220 0 12 8%22 width%3D%2212%22 height%3D%228%22%3E%3Cpath fill%3D%22none%22 stroke%3D%22rgba(191%2C191%2C191%2C0.9)%22 stroke-width%3D%221.5%22 d%3D%22M0%2C0 6%2C8 12%2C0%22/%3E%3C/svg%3E') 0 0 100% repeat; border-width: 0 0 10px; border-style: solid; position: relative;}</style>";
+    let head = "<style>p {padding: 1rem; border: 1px dashed red;} .math-inline{font-family: monospace; font-weight: bold; color: grey;} .math-display{font-family: monospace; font-weight: bold; color: grey; display: block; padding: 1rem; text-align: center; font-size: 2rem;} hr {margin-top: 2px solid gray;} hr.style-dashed {border-style: dashed;} hr.style-dotted {border-style: dotted;} hr.style-sawtooth {border-image: url('data:image/svg+xml,%3Csvg xmlns%3D%22http%3A//www.w3.org/2000/svg%22 viewBox%3D%220 0 12 8%22 width%3D%2212%22 height%3D%228%22%3E%3Cpath fill%3D%22none%22 stroke%3D%22rgba(191%2C191%2C191%2C0.9)%22 stroke-width%3D%221.5%22 d%3D%22M0%2C0 6%2C8 12%2C0%22/%3E%3C/svg%3E') 0 0 100% repeat; border-width: 0 0 10px; border-style: solid; position: relative;} .environment {background-color: lightgray; padding: 1rem; border: 1px solid black;} .environment-name {border-bottom: 1px solid black; margin-bottom: 1rem;}</style>";
 
     fs::write("out.html", format!("<head>{head}</head><body>{out}</body>"))
         .expect("Could not write to file");

@@ -23,6 +23,8 @@ pub enum Token {
     CodeBlock(String),
     InlineMath(String),
     DisplayMath(String),
+    EnvBegin(String),
+    EnvEnd,
     NewLine,
     Hr(HrStyle),
     NBSP,
@@ -108,7 +110,7 @@ impl<'a> Lexer<'a> {
                     line_begins = true;
                     continue;
                 }
-                '#' => {
+                '#' if line_begins => {
                     push_text(&mut tokens, &mut current_text);
                     tokens.push(Token::Header(self.advance_until(' ').len() as u8 + 1));
                 }
@@ -185,6 +187,18 @@ impl<'a> Lexer<'a> {
                         current_text.push(*current);
                     }
                 }
+                '%' => {
+                    self.advance_while('%');
+                    if self.next_is('\n') {
+                        tokens.push(Token::EnvEnd);
+                    } else {
+                        let name = self.advance_until_one_of_excluded(vec![' ', '\n']);
+                        if self.next_is(' ') {
+                            self.advance();
+                        }
+                        tokens.push(Token::EnvBegin(name));
+                    }
+                }
                 _ => {
                     current_text.push(*current);
                 }
@@ -226,21 +240,34 @@ impl<'a> Lexer<'a> {
         }
         return true;
     }
-    fn next_n_is(&self, what: char, n: usize) -> bool {
-        if let Some(next_char) = self.input.chars().nth(self.pos + n) {
-            return next_char == what;
-        }
-        return false;
-    }
     fn eof(&self) -> bool {
         self.pos >= self.input.len()
+    }
+    fn advance_while(&mut self, c: char) {
+        while !self.eof() && self.next_is(c) {
+            self.advance();
+        }
     }
     fn advance_until(&mut self, until: char) -> String {
         let mut consumed: Vec<char> = vec![];
         while !self.eof() && !self.next_is(until) {
             consumed.push(self.advance().unwrap());
         }
-        self.advance().unwrap();
+        self.advance();
+        consumed.iter().collect::<String>()
+    }
+    fn advance_until_one_of_excluded(&mut self, until: Vec<char>) -> String {
+        let mut consumed: Vec<char> = vec![];
+        fn check_next(next: &Option<char>, until: &Vec<char>) -> bool {
+            if let Some(n) = next {
+                until.contains(n)
+            } else {
+                false
+            }
+        }
+        while !self.eof() && !check_next(&self.next(), &until) {
+            consumed.push(self.advance().unwrap());
+        }
         consumed.iter().collect::<String>()
     }
     fn advance_until_chars(&mut self, until: Vec<char>) -> String {

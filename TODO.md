@@ -1,0 +1,1 @@
+- Fix unpaired delimiter parsing until EOF (match blocking condition of advance_until)
